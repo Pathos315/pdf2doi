@@ -40,8 +40,8 @@ def validate_doi_web(doi,method=None):
     If dx.doi.org confirmed that DOI exists, the function returns the full text obtained from dx.doi.org
     Depending on the value of method (default =config.get('method_dxdoiorg')), the format of the text returned by dx.doi.org will be different
     """
-    if method == None:
-        method = config.get('method_dxdoiorg')
+    
+    method = config.get('method_dxdoiorg') if method == None else method
     try:
         # TODO(DJRHails): This should really use the handle API (https://www.doi.org/factsheets/DOIProxy.html)
         url = "http://dx.doi.org/" + doi
@@ -53,24 +53,16 @@ def validate_doi_web(doi,method=None):
             text = r.text
             # 503 or 504 errors are common
             if r.status_code >= 500 or (text.lower().find("503 Service Unavailable".lower() )>=0) or (not text):
-                NumberAttempts = NumberAttempts -1
-                logger.info("Could not reach dx.doi.org. Trying again. Attempts left: " + str(NumberAttempts))
+                NumberAttempts -= 1
+                logger.info(f"Could not reach dx.doi.org. Trying again. Attempts left: {NumberAttempts)
                 continue
             else:
                 NumberAttempts = 0
 
             # 404 = DOI Not Found, or DOI Prefix Not Found
-            if r.status_code == 404:
-                return None
-
-            # Backup check for HTML error page content
-            if text.lower().find("DOI cannot be found".lower()) != -1:
-                return None
-                
-            return text
+            return None if r.status_code == 404 or (text.lower().find("DOI cannot be found".lower()) != -1) else text
     except Exception as e:
-        logger.error(r"Some error occured within the function validate_doi_web")
-        logger.error(e)
+        logger.error("Some error occured within the function validate_doi_web, %s" % e)
         return -1
 
 def validate_arxivID_web(arxivID):
@@ -80,17 +72,13 @@ def validate_arxivID_web(arxivID):
     If export.arxiv.org confirmed that DOI exists, the function returns the data obtained from export.arxiv.org
     """
     try:
-        url = "http://export.arxiv.org/api/query?search_query=id:" + arxivID
+        url = f"http://export.arxiv.org/api/query?search_query=id:{arxivID}"
         result = feedparser.parse(url)
         items = result.entries[0]
         found = len(items) > 0
-        if not found: 
-            return None
-        else:
-            return items
+        return None if not items else items
     except Exception as e:
-        logger.error(r"Some error occured within the function arxiv2bib")
-        logger.error(e)
+        logger.error("Some error occured within the function arxiv2bib, %s" % e)
         return -1    
 
 def validate(identifier,what='doi'):
@@ -113,52 +101,47 @@ def validate(identifier,what='doi'):
     """  
     if not identifier:
         return None
+    
+    if not config.get('webvalidation'):
+        logger.info(f"NOTE: Web validation is deactivated. Set webvalidation = True (or remove the '-nwv' argument if working from command line) in order to validate a potential DOI on dx.doi.org.")
+        return True
+
     if what=='doi':
         standard_doi = standardise_doi(identifier)
+
+        if not standard_doi:
+            return False
+
         if identifier != standard_doi:
             logger.info(f"Standardised DOI: {identifier} -> {standard_doi}")
 
-        if standard_doi:
-            if config.get('webvalidation'):
-                logger.info(f"Validating the possible DOI {standard_doi} via a query to dx.doi.org...")
-                result = validate_doi_web(standard_doi)
-                if result==-1:
-                    logger.error(f"Some error occured during connection to dx.doi.org.")
-                    return None
-                if isinstance(result,str) and result.strip()[0:5] == '@misc':
-                    logger.error(f"The DOI was validated by by dx.doi.org, but the validation string starts with the tag \"@misc\". This might be the DOI of the journal and not the article itself.")
-                    return False
-                if result:
-                    logger.info(f"The DOI {standard_doi} is validated by dx.doi.org.")
-                    return result
-                else:
-                    logger.info(f"The DOI {standard_doi} is not valid according to dx.doi.org.")
-                    return False
-            else:
-                logger.info(f"NOTE: Web validation is deactivated. Set webvalidation = True (or remove the '-nwv' argument if working from command line) in order to validate a potential DOI on dx.doi.org.")
-                return True
-        else: return False
+        logger.info(f"Validating the possible DOI {standard_doi} via a query to dx.doi.org...")
+        result = validate_doi_web(standard_doi)
+
+        if not str(result).strip()[0:5] == '@misc' or -1:
+            logger.info(f"The DOI {standard_doi} is validated by dx.doi.org.")
+            return result
+
+        logger.info(f"The DOI {standard_doi} is not valid according to dx.doi.org.")
 
     elif what=='arxiv':
-        if re.match(arxiv2007_pattern,identifier,re.I):
-            if config.get('webvalidation'):
-                logger.info(f"Validating the possible arxiv ID {identifier} via a query to export.arxiv.org...")
-                result = validate_arxivID_web(identifier)
-                if result==-1:
-                    logger.error(f"Some error occured during connection to export.arxiv.org.")
-                    return None
-                if result:
-                    logger.info(f"The arXiv ID {identifier} is validated by export.arxiv.org")
-                    if 'arxiv_doi' in result.keys():
-                        logger.info(f"Moreover, export.arxiv.org told us that this paper actually has a DOI: {result['arxiv_doi']}")
-                    return result
-                else:
-                    logger.info(f"The arXiv ID {identifier} is not valid according to export.arxiv.org.")
-                    return False
-            else:
-                logger.info(f"NOTE: Web validation is deactivated. Set webvalidation = True (or remove the '-nwv' argument if working from command line) in order to validate a potential arxiv ID on export.arxiv.org.")
-                return True
-        else: return False
+        if not arxiv2007_pattern.match(identifier,re.I):
+            return False
+
+        logger.info(f"Validating the possible arxiv ID {identifier} via a query to export.arxiv.org...")
+        result = validate_arxivID_web(identifier)
+
+        if result==-1:
+            logger.error(f"Some error occured during connection to export.arxiv.org.")
+            return None
+        if not str(result).strip()[0:5] == '@misc' or -1 :
+            logger.info(f"The DOI {standard_doi} is validated by dx.doi.org.")
+            return result
+        if 'arxiv_doi' in result.keys():
+            logger.info(f"Moreover, export.arxiv.org told us that this paper actually has a DOI: {result['arxiv_doi']}")
+            return result
+
+        logger.info(f"The arXiv ID {identifier} is not valid according to export.arxiv.org.")
 
     #elif what=='isbn':
     #    # code taken from https://www.oreilly.com/library/view/regular-expressions-cookbook/9781449327453/ch04s13.html
