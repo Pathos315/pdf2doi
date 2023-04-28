@@ -144,7 +144,7 @@ def __find_doi(file: io.IOBase) -> dict:
     return result 
 
 
-def save_identifiers(filename_identifiers, results, clipboard=False):
+def save_identifiers(filename_identifiers: str, results: list[dict], clipboard:bool=False):
     ''' Write all identifiers contained in the input list 'results' into a text file with a path specified by filename_identifiers (if filename_identifiers is a
         valid string) and/or into the clipboard (if clipboard = True).
 
@@ -163,36 +163,24 @@ def save_identifiers(filename_identifiers, results, clipboard=False):
     '''
 
     # If a string was passed via the args.filename_identifiers, we create the full path of the file where identifiers will be saved
-    if isinstance(filename_identifiers, str):
-        path_filename_identifiers = path.dirname(results[0]['path']) + config.get('separator') + filename_identifiers
-        try:
-            text = ''
-            for result in results:
-                if result['validation_info']:
-                    text = text + '{:<15s} {:<40s} {:<10s}\n'.format(result['identifier_type'], result['identifier'],
-                                                                     result['path'])
-                else:
-                    text = text + '{:<15s} {:<40s} {:<10s}\n'.format('n.a.', 'n.a.', result['path'])
-            with open(path_filename_identifiers, "w", encoding="utf-8") as text_file:
-                text_file.write(text)
-            logger.info(f'All found identifiers were saved in the file {filename_identifiers}')
-        except Exception as e:
-            logger.error(e)
-            logger.error(f'A problem occurred when trying to write into the file {filename_identifiers}')
+    path_filename_identifiers = pathlib.Path(results[0]['path'] / filename_identifiers)
+    try:
+        text = ''.join(f"{result.get('identifier_type', 'n.a')}\n {result.get('identifier', 'n.a')}\n {result.get('path')}" for result in results if result['validation_info'])
+        with open(path_filename_identifiers, "w", encoding="utf-8") as text_file:
+            text_file.write(text)
+            logger.info("All found identifiers were saved in the file %s" % filename_identifiers)
+    except Exception as e:
+        logger.error("A problem occurred when trying to write into the file %s %s" %filename_identifiers, e)
 
     # If clipboard is set to true, we copy all identifiers into the clipboard
     if clipboard:
         import pyperclip
         try:
-            text = ''
-            for result in results:
-                if result['validation_info']:
-                    text = text + result['identifier'] + '\n'
+            text = ''.join(result['identifier'] for result in results if result['validation_info'])
             pyperclip.copy(text)
             logger.info(f'All found identifiers have been stored in the system clipboard')
         except Exception as e:
-            logger.error(e)
-            logger.error(f'A problem occurred when trying to write into the system clipboard')
+            logger.error('A problem occurred when trying to write into the system clipboard: %s' % e)
 
 
 def main():
