@@ -4,10 +4,12 @@ from os import path, listdir
 import pdf2doi.finders as finders
 import pdf2doi.config as config
 import io
-
+import pathlib
 
 # import easygui Modules that are commented here are imported later only when needed, to improve start up time
 # import pyperclip
+
+logger = logging.getLogger("pdf2doi")
 
 def pdf2doi(target):
     ''' This is the main routine of the library. When the library is used as a command-line tool (via the entry-point "pdf2doi") the input arguments
@@ -44,63 +46,26 @@ def pdf2doi(target):
 
     '''
 
-    logger = logging.getLogger("pdf2doi")
+    target = pathlib.Path(target) if not isinstance(target, pathlib.Path) else target
 
-    # Check if path is valid
-    if not (path.exists(target)):
-        logger.error(f"{target} is not a valid path to a file or a directory.")
+    if not target.is_dir() and not target.is_file():
+        logger.error("%s is not a valid path to a file or a directory." % target)
         return None
 
-    # Check if target is a directory
-    # If yes, we look for all the .pdf files inside it, and for each of them
-    # we call again this function
-    if path.isdir(target):
-        logger.info(f"Looking for pdf files in the folder {target}...")
-        pdf_files = [f for f in listdir(target) if (f.lower()).endswith('.pdf')]
-        numb_files = len(pdf_files)
-
-        if numb_files == 0:
-            logger.error("No pdf files found in this folder.")
-            return None
-
-        logger.info(f"Found {numb_files} pdf files.")
-        if not (
-        target.endswith(config.get('separator'))):  # Make sure the path ends with "\" or "/" (according to the OS)
-            target = target + config.get('separator')
-
-        identifiers_found = []  # For each pdf file in the target folder we will store a dictionary inside this list
-        for f in pdf_files:
-            logger.info("................")
-            file = target + f
-            # For each file we call again this function, but now the input argument target is set to the path of the file
-            result = pdf2doi(target=file)
-            logger.info(result['identifier'])
-            identifiers_found.append(result)
-
-        logger.info("................")
-
-        return identifiers_found
-
-    # If target is not a directory, we check that it is an existing file and that it ends with .pdf
-    else:
-        filename = target
-        logger.info(f"Trying to retrieve a DOI/identifier for the file: {filename}")
-        if not path.exists(filename):
-            logger.error(f"'{filename}' is not a valid file.")
-            return None
-        if not (filename.lower()).endswith('.pdf'):
-            logger.error("The file must have .pdf extension.")
-            return None
-        result = pdf2doi_singlefile(filename)
-        if result['identifier'] == None:
+    if target.is_file() and target.suffix == '.pdf':
+        result = pdf2doi_singlefile(target)
+        if not result['identifier']:
             logger.error("It was not possible to find a valid identifier for this file.")
+        if config.get('save_identifier_metadata') and result['method'] != "document_infos":
+            add_found_identifier_to_metadata(target, result['identifier'])
+        return result
 
-        if (config.get('save_identifier_metadata')) == True:
-            if result['identifier'] and not (result['method'] == "document_infos"):
-                finders.add_found_identifier_to_metadata(filename, result['identifier'])
-
-        return result  # This will be a dictionary with all entries as None
-
+    if target.is_dir():
+        logger.info("Looking for pdf files in the folder %s" % target...")
+        pdf_files = [pdf2doi_singlefile(file) for file in target.iterdir() if file.suffix == '.pdf']
+        if len(pdf_files) == 0:
+            logger.error("No pdf files found in this folder.")
+        return pdf_files if pdf_files else None
 
 def pdf2doi_singlefile(file):
     """
@@ -124,27 +89,17 @@ def pdf2doi_singlefile(file):
         result['method'] = method used to find the identifier
 
     """
-
-    logger = logging.getLogger("pdf2doi")
-
     result = {'identifier': None}
-
+                    
     try:
         with open(file, 'rb') as f:
             result = __find_doi(f)
-    except TypeError:
-        try:
-            result = __find_doi(file)
-        except Exception:
-            logger.exception("File processing error")
-    except Exception:
-        logger.exception("File(open) processing error")
-
+    except (TypeError, Exception) as e:
+        logger.error("File processing error" % e)
     return result
 
 
 def __find_doi(file: io.IOBase) -> dict:
-    logger = logging.getLogger("pdf2doi")
 
     # Several methods are now applied to find a valid identifier in the .pdf file identified by filename
 
@@ -206,7 +161,6 @@ def save_identifiers(filename_identifiers, results, clipboard=False):
     -------
     None.
     '''
-    logger = logging.getLogger("pdf2doi")
 
     # If a string was passed via the args.filename_identifiers, we create the full path of the file where identifiers will be saved
     if isinstance(filename_identifiers, str):
