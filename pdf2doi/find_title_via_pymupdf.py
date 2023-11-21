@@ -8,29 +8,29 @@ import fitz
 def fonts(doc, granularity=False):
     styles = {}
     font_counts = {}
-    for page in doc:
-        blocks = page.get_text('dict')['blocks']
-        for b in blocks:  # iterate through the text blocks
-            if b['type'] == 0:  # block contains text
-                for l in b["lines"]:  # iterate through the text lines
-                    for s in l["spans"]:  # iterate through the text spans
-                        if granularity:
-                            identifier = "{0}_{1}_{2}_{3}".format(s['size'], s['flags'], s['font'], s['color'])
-                            styles[identifier] = {'size': s['size'], 'flags': s['flags'], 'font': s['font'],
-                                                    'color': s['color']}
-                        else:
-                            identifier = "{0}".format(s['size'])
-                            styles[identifier] = {'size': s['size'], 'font': s['font']}
-    
-                        font_counts[identifier] = font_counts.get(identifier, 0) + 1  # count the fonts usage
-    
+
+    styles = {}
+    font_counts = {}
+
+    # Use generator expressions to flatten the nested loops
+    text_blocks = (b for page in doc for b in page.get_text('dict')['blocks'] if b['type'] == 0)     # iterate through the text blocks if block contains text
+    text_lines = (l for b in text_blocks for l in b["lines"])                                        # iterate through the text lines
+    text_spans = (s for l in text_lines for s in l["spans"])                                         # iterate through the text spans
+
+    for s in text_spans:
+        if not granularity:
+            identifier = f"{s['size']}"
+            styles[identifier] = {'size': s['size'], 'font': s['font']}
+        identifier = f"{s['size']}_{s['flags']}_{s['font']}_{s['color']}"
+        styles[identifier] = {'size': s['size'], 'flags': s['flags'], 'font': s['font'], 'color': s['color']}
+        font_counts[identifier] = font_counts.get(identifier, 0) + 1                                 # count the fonts usage
+
     font_counts = sorted(font_counts.items(), key=itemgetter(1), reverse=True)
     
     if len(font_counts) < 1:
         raise ValueError("Zero discriminating fonts found!")
     
     return font_counts, styles
-    
     
 def font_tags(font_counts, styles):
     """Returns dictionary with font sizes as keys and tags as value.
